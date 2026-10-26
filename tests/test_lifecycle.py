@@ -318,5 +318,40 @@ class TestLifecycle(unittest.TestCase):
         self.assertEqual(self.qb.deleted, [])
 
 
+class TestLifecycleWithPack(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Database(os.path.join(self.tmp.name, "t.db"))
+        tid = self.db.save_title({"key": "tvdb:79349", "tvdb": "79349", "name": "X", "kind": "series", "origin": "series"})
+        self.rids = []
+        for e in (1, 2):
+            rid = self.db.save_release(tid, {"label": f"S01E0{e}", "season": 1, "episode": e, "provider": "public",
+                                             "torrent_url": "u", "torrent_tag": "pack", "seeds": 1})
+            strm = f"/catalog/Series/X/Season 01/X S01E0{e}.strm"
+            self.db.execute("UPDATE releases SET strm=? WHERE id=?", strm, rid)
+            self.rids.append((rid, strm))
+        now = time.time()
+        self.db.execute("INSERT INTO torrents(infohash,release_id,state,file,started_at,last_access,completed_at,rest_released) "
+                        "VALUES('h1',?, 'seeding', 'P/a.mkv', ?, ?, ?, 1)", self.rids[0][0], now - 9e5, now - 9e5, now - 9e5)
+        self.qb = FakeQBit()
+        self.qb.torrents = {"h1": {"hash": "h1", "progress": 1, "ratio": 9, "seeding_time": 9e6, "force_start": True}}
+        self.jf, self.sv = FakeJellyfin(), FakeService()
+        self.lc = Lifecycle(config.DEFAULTS, self.db, self.qb, self.jf, self.sv, rules=RULES.get)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_watching_the_other_episode_holds_the_pack(self):
+        self.jf.sessions.append({"NowPlayingItem": {"Id": strm_item_id(self.rids[1][1])},
+                                 "PlayState": {"PositionTicks": 60 * 10**7}})
+        self.lc.step()
+        self.assertEqual(self.qb.deleted, [])
+
+    def test_deleting_the_pack_forgets_every_episode(self):
+        self.lc.step()
+        self.assertEqual(self.qb.deleted, ["h1"])
+        self.assertEqual(sorted(self.sv.forgotten), sorted(r for r, _ in self.rids))
+
+
 if __name__ == "__main__":
     unittest.main()

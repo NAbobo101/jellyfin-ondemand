@@ -63,9 +63,9 @@ def strm_path(folder):
 
 
 def choose_releases(releases):
-    """(main, 4k): main = 1080p, else 720p; 4k = the one labelled 4K, if any."""
+    """(main, 4k): main = 1080p, else 720p, else SD; 4k = the one labelled 4K, if any."""
     by = {r["label"]: r for r in releases}
-    return by.get("1080p") or by.get("720p"), by.get("4K")
+    return by.get("1080p") or by.get("720p") or by.get("SD"), by.get("4K")
 
 
 class Catalog:

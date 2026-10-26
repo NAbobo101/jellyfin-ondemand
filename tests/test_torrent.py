@@ -181,5 +181,143 @@ class TestStart(unittest.TestCase):
         self.assertEqual(info["alternatives"], ["/downloads/F/Movie.mkv"])
 
 
+# ---------------------------------------------------------------- season pack in torrent.start
+PACK = [("P/Show.S01E01.mkv", 1_000_000_000), ("P/Show.S01E02.mkv", 1_000_000_000), ("P/Show.S01E03.mkv", 1_000_000_000)]
+
+
+def pack_meta():
+    off, files = 0, []
+    for name, size in PACK:
+        files.append(TorrentFile(name, size, off))
+        off += size
+    return TorrentMeta("b" * 40, "P", 1 << 22, off // (1 << 22) + 1, files, False)
+
+
+class PackQBit:
+    def __init__(self, prios, progress, state="downloading"):
+        self.t = {"hash": "b" * 40, "tags": "ondemand,od-pack", "state": state, "progress": 0.3, "seq_dl": True,
+                  "f_l_piece_prio": True, "save_path": "/data/ondemand", "download_path": ""}
+        self.prios, self.progress, self.calls = list(prios), list(progress), []
+
+    def info(self, tag=None, hashes=None, **kw):
+        return [self.t] if tag == "od-pack" else []
+
+    def one(self, h):
+        return self.t
+
+    def export(self, h):
+        return b"x"
+
+    def files(self, h):
+        return [{"name": n, "index": i, "priority": self.prios[i], "size": s, "progress": self.progress[i]}
+                for i, (n, s) in enumerate(PACK)]
+
+    def pause(self, hashes):
+        self.calls.append(("pause",))
+        self.t["state"] = "pausedDL"
+
+    def set_file_priority(self, h, indexes, prio):
+        if indexes:
+            self.calls.append(("prio", tuple(sorted(indexes)), prio))
+
+    def set_sequential(self, *a, **k):
+        pass
+
+    def set_first_last(self, *a, **k):
+        pass
+
+    def force_start(self, hashes, value=True):
+        self.calls.append(("force",))
+
+
+class TestPack(unittest.TestCase):
+    CFG = {"save_path": "/data/ondemand", "path_map": PATH_MAP, "torrent_wait_s": 1, "min_video_mb": 1}
+
+    def start(self, qb, episode, **kw):
+        with mock.patch("ondemand.torrent.read_torrent", return_value=pack_meta()):
+            return torrent.start(qb, "rid2", "u", self.CFG, episode=episode, tag="od-pack", **kw)
+
+    def test_requested_episode_jumps_the_pack_queue(self):
+        qb = PackQBit(prios=[1, 1, 1], progress=[0.5, 0, 0])          # E01 downloading, rest released
+        info = self.start(qb, (1, 3))
+        self.assertIn(("pause",), qb.calls)
+        self.assertIn(("prio", (2,), 1), qb.calls)
+        self.assertIn(("prio", (0, 1), 0), qb.calls)                   # E01 and E02 step aside
+        self.assertTrue(info["switched_target"])
+        self.assertEqual(qb.calls[-1], ("force",))
+
+    def test_does_not_zero_a_file_someone_else_is_reading(self):
+        qb = PackQBit(prios=[1, 1, 0], progress=[0.5, 0, 0])
+        self.start(qb, (1, 3), keep={"P/Show.S01E01.mkv"})
+        self.assertIn(("prio", (1,), 0), qb.calls)
+        self.assertNotIn(("prio", (0, 1), 0), qb.calls)
+
+    def test_episode_already_the_target_or_complete_changes_nothing(self):
+        qb = PackQBit(prios=[1, 0, 0], progress=[0.5, 0, 0])
+        info = self.start(qb, (1, 1))                                   # already the target, nobody else active
+        self.assertEqual(qb.calls, [("force",)])
+        self.assertFalse(info["switched_target"])
+        qb = PackQBit(prios=[1, 1, 1], progress=[0.5, 0, 1])
+        self.assertFalse(self.start(qb, (1, 3))["switched_target"])     # E03 already downloaded
+
+
+class MagnetQBit(PackQBit):
+    """Magnet: the add does NOT pause (paused=false + stopCondition) and export answers 409 until the metadata arrives."""
+
+    def __init__(self, export_failures=2):
+        super().__init__(prios=[1, 1, 1], progress=[0, 0, 0], state="metaDL")
+        self.t["tags"], self.failures, self.added = "", export_failures, None
+
+    def add(self, url=None, **op):
+        self.added = (url, op)
+        self.t["tags"] = op["tags"]
+
+    def export(self, h):
+        from ondemand.qbit import QBitError
+        if self.failures > 0:
+            self.failures -= 1
+            raise QBitError("GET torrents/export: HTTP 409", 409)
+        self.t["state"] = "pausedDL"                       # stopCondition stopped the torrent
+        return b"x"
+
+    def info(self, tag=None, hashes=None, **kw):
+        return [self.t] if self.t["tags"] and tag and tag in self.t["tags"].split(",") else []
+
+    def one(self, h):
+        return self.t if self.added else None                     # only exists after the add
+
+
+class TestMagnet(unittest.TestCase):
+    CFG = {"save_path": "/data/ondemand", "path_map": PATH_MAP, "torrent_wait_s": 2, "metadata_wait_s": 5, "min_video_mb": 1}
+
+    def test_add_unpaused_with_stop_condition_and_waits_for_export(self):
+        qb = MagnetQBit(export_failures=2)
+        with mock.patch("ondemand.torrent.read_torrent", return_value=pack_meta()):
+            info = torrent.start(qb, "rid2", "magnet:?xt=urn:btih:" + "b" * 40, self.CFG, episode=(1, 2), tag="od-pack",
+                                 infohash="b" * 40, public=True, min_video_mb=100)
+        url, op = qb.added
+        self.assertTrue(url.startswith("magnet:"))
+        self.assertIs(op["paused"], False)
+        self.assertEqual(op["stopCondition"], "MetadataReceived")
+        self.assertEqual(qb.failures, 0)                                   # retried on 409
+        self.assertIn(("prio", (1,), 1), qb.calls)                       # only the requested episode downloads
+        self.assertIn(("prio", (0, 2), 0), qb.calls)
+        self.assertEqual(info["file"].path, "P/Show.S01E02.mkv")
+
+    def test_metadata_that_never_arrives_becomes_unavailable(self):
+        qb = MagnetQBit(export_failures=10 ** 6)
+        cfg = {**self.CFG, "metadata_wait_s": 1}
+        with mock.patch("ondemand.torrent.read_torrent", return_value=pack_meta()), self.assertRaises(Unavailable):
+            torrent.start(qb, "rid2", "magnet:?xt=urn:btih:" + "b" * 40, cfg, episode=(1, 2), tag="od-pack")
+
+    def test_torrent_file_does_not_wait_for_metadata_nor_change_the_add(self):
+        qb = MagnetQBit(export_failures=0)
+        qb.t["state"] = "pausedDL"
+        with mock.patch("ondemand.torrent.read_torrent", return_value=pack_meta()):
+            torrent.start(qb, "rid2", "https://t.example/x.torrent", self.CFG, episode=(1, 2), tag="od-pack")
+        self.assertIs(qb.added[1]["paused"], True)
+        self.assertNotIn("stopCondition", qb.added[1])
+
+
 if __name__ == "__main__":
     unittest.main()
