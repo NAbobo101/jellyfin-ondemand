@@ -217,15 +217,26 @@ class Jellyfin:
                 return None
             raise
 
-    def remote_search_movie(self, term, year=None, limit=8):
-        """Movies on TMDb through RemoteSearch: comes in the library's metadata language and uses the
-        plugin's key. The result only carries the TMDb id; the IMDb id comes from imdb_from_tmdb."""
+    def remote_search_movie(self, term, year=None, limit=8, language=None):
+        """Movies on TMDb through RemoteSearch: comes in the library's metadata language (or `language`)
+        and uses the plugin's key. The result only carries the TMDb id; the IMDb id comes from imdb_from_tmdb."""
         info = {"Name": term}
         if year:
             info["Year"] = int(year)
+        if language:
+            info["MetadataLanguage"] = language
         r = self._req("POST", "/Items/RemoteSearch/Movie",
                       {"SearchInfo": info, "SearchProviderName": "TheMovieDb"}) or []
         return r[:limit]
+
+    def movie_by_tmdb(self, tmdb, language=None):
+        """The movie on TMDb by TMDb id, optionally in another `language` ("en": the name release
+        groups use), or None."""
+        info = {"ProviderIds": {"Tmdb": str(tmdb)}}
+        if language:
+            info["MetadataLanguage"] = language
+        r = self._req("POST", "/Items/RemoteSearch/Movie", {"SearchInfo": info, "SearchProviderName": "TheMovieDb"}) or []
+        return r[0] if r else None
 
     def remote_search_series(self, term, limit=8):
         """Series on TMDb through RemoteSearch (name, overview and poster in the metadata language;

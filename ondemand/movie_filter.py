@@ -138,14 +138,14 @@ def build_movies(candidates, resolver, cfg):
     unresolved = defaultdict(list)
     for c in alive:
         ids = c.get("ids") or {}
-        imdb = ids.get("imdb") or (resolver.by_tmdb(ids["tmdb"]) if ids.get("tmdb") else None)
+        imdb = ids.get("imdb") or (resolver.by_tmdb(ids["tmdb"]) if ids.get("tmdb") and resolver else None)
         if imdb:
             by_imdb[imdb].append(c)
             meta.setdefault(imdb, {"tmdb": ids.get("tmdb"), "year": c["year"], "name": c["raw_name"]})
         else:
             unresolved[(normalize(c["raw_name"]), c["year"])].append(c)
     for (_, year), group in unresolved.items():
-        found, reason = resolver.by_name(group[0]["raw_name"], year)
+        found, reason = resolver.by_name(group[0]["raw_name"], year) if resolver else (None, "no resolver")
         if found is None:
             quarantine[f"{group[0]['raw_name']} ({year})"] = {"reason": reason, "candidates": len(group),
                                                               "example": group[0]["title"]}
@@ -173,3 +173,32 @@ def build_movies(candidates, resolver, cfg):
                  "kind": "movie", "origin": versions[0]["provider"]}
         out[imdb] = (title, versions)
     return {"movies": out, "discards": discards, "quarantine": quarantine}
+
+
+def build_for_movie(candidates, target, cfg):
+    """Like `build_movies`, but for ONE movie already identified (search outside the library). `target`:
+    {"imdb", "tmdb", "name", "names": [names to accept], "year"}. Items that carry another IMDb id, or
+    whose name/year do not match, go first; the rest get the movie's ids. Returns (title, versions) or
+    (None, []) and the discards."""
+    names = {normalize(n) for n in target.get("names") or () if n}
+    accepted, out = [], []
+    for c in candidates:
+        ids = c.get("ids") or {}
+        if ids.get("imdb"):
+            if ids["imdb"] != target["imdb"]:
+                out.append((c, "another movie (IMDb id)"))
+                continue
+        else:
+            data, reason = parse_movie(c["title"])
+            if data is None:
+                out.append((c, reason))
+                continue
+            if normalize(data["raw_name"]) not in names or (target.get("year") and abs(data["year"] - target["year"]) > 1):
+                out.append((c, "another movie (name/year)"))
+                continue
+        accepted.append({**c, "ids": {"imdb": target["imdb"], "tmdb": target.get("tmdb")}})
+    r = build_movies(accepted, None, cfg)
+    found = r["movies"].get(target["imdb"])
+    if found and target.get("name"):
+        found[0].update(name=target["name"], year=target.get("year") or found[0]["year"])
+    return found or (None, []), r["discards"] + out

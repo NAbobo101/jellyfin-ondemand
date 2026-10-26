@@ -15,6 +15,7 @@ DEFAULTS = {
     "general": {
         "database": "/data/ondemand.db",
         "log_level": "INFO",
+        "plugins_dir": "/plugins",    # your own providers (see docs/writing-a-provider.md)
     },
     "gateway": {
         "port": 8097,
@@ -49,10 +50,11 @@ DEFAULTS = {
         "movies": "Movies",           # sub-folders (add each one to a Jellyfin library); "" disables
         "movies_4k": "Movies 4K",
         "series": "Series",
-        "batch": 10, "series_batch": 5, "interval_min": 2,
+        "batch": 10, "series_batch": 5, "interval_min": 2,   # writes only with nobody watching
+        "import_interval_h": 6,       # how often every provider's feed() is read
     },
     "movies": {
-        "enabled": True, "interval_h": 6,
+        "enabled": True,
         "resolutions": ["2160p", "1080p", "720p"],      # 2160p goes to the 4K library (labelled "4K")
         "seeds_min": 1, "public_seeds_min": 2, "freeleech_min": 100,
         "max_gb": 40, "max_gb_4k": 80,
@@ -61,7 +63,7 @@ DEFAULTS = {
         "months_unplayed": 12,         # never-played catalog titles leave after this (not implemented yet)
     },
     "series": {
-        "enabled": True, "interval_h": 6, "tvmaze_cache": "/data/tvmaze-cache.json",
+        "enabled": True, "tvmaze_cache": "/data/tvmaze-cache.json",
         "resolutions": ["1080p", "720p"],
         "seeds_min": 1, "public_seeds_min": 2, "freeleech_min": 100,
         "pack_max_gb": 60, "single_max_gb": 8,
@@ -79,6 +81,7 @@ DEFAULTS = {
     },
     "subtitles": {
         "language": "",               # BCP 47 code (e.g. "pt-BR", "es", "fr"); "" = no subtitle fetching
+        "provider": "subdl",          # "subdl" (api_key in secrets.toml [subdl]) or "module:Class" (a plugin)
         "interval_h": 6, "max_attempts": 56,    # 56 x 6 h = 14 days trying
     },
     # Search outside the library (search.py + web/search.js): API only for logged-in Jellyfin users.
@@ -90,6 +93,7 @@ DEFAULTS = {
         "library_cache_min": 30,      # IMDb ids of LOCAL movies (the catalog comes from the database)
         "tmdb_max": 5,                # TMDb results turned into IMDb ids per search
         "max_results": 24,
+        "check_availability": True,   # only show movies some provider has (one provider search per card)
         "item_wait_s": 300,           # folder written -> item with metadata
         "metadata_wait_s": 45,        # item born without a poster: play anyway after this
     },
