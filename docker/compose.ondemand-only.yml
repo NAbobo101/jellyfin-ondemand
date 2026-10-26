@@ -1,0 +1,29 @@
+# jellyfin-ondemand ALONE, for people who already run Jellyfin and qBittorrent.
+# Paths come from docker/.env (not committed); copy the block below into it and adjust:
+#
+#   CATALOG_DIR=/srv/ondemand/catalog        # also mount this folder in your Jellyfin (read-only is enough)
+#   DOWNLOADS_DIR=/data/torrents             # qBittorrent's download folder on the host
+#   PUID=1000
+#   PGID=1000
+#
+#   docker compose -f docker/compose.ondemand-only.yml up -d --build
+#
+# The ports are published because your Jellyfin is not on this compose network: it reaches the gateway
+# at http://<this host>:8097 ([gateway] public_url), and your reverse proxy sends /ondemand/* to :8098.
+name: ondemand
+
+services:
+  ondemand:
+    build: {context: .., dockerfile: docker/Dockerfile}
+    image: jellyfin-ondemand:local
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports: ["8097:8097", "8098:8098"]
+    volumes:
+      - ../config:/config:ro
+      - ../data:/data
+      - ${CATALOG_DIR:-../catalog}:/catalog
+      - ${DOWNLOADS_DIR:-../downloads}:/downloads:ro
+      # - ../plugins:/plugins:ro
+    restart: unless-stopped
+    mem_limit: 256m
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}

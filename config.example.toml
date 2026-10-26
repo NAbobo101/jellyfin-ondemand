@@ -120,6 +120,7 @@ rows = 50
 # seed = { min_hours = 0, min_ratio = 1.0 }
 # movie_categories = [2000]
 # series_categories = [5000]
+# id_search = true                  # imdbid/tvdbid queries; false if the indexer only supports text search
 
 # A private tracker running UNIT3D. secrets.toml: [providers.my-unit3d] api_token
 # [[providers]]

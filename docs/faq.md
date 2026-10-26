@@ -1,5 +1,10 @@
 # FAQ and troubleshooting
 
+**First, always:** `python3 -m ondemand.cli doctor` (in the container; `docker compose … run --rm ondemand
+python3 -m ondemand.cli doctor` if the service does not start). It checks config, secrets, the catalog
+marker, Jellyfin (key, libraries, users, scripts), qBittorrent (version, access, path mapping) and the
+providers, and prints how to fix each failure. `--network` also reads every provider's feed.
+
 **Nothing is written to the catalog.** Check `<root>/.ondemand-marker` exists, then
 `cli providers` and `cli preview`: the discards are counted by reason. Writes also wait while someone is
 watching. `docker compose logs ondemand` shows each import.

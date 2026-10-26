@@ -1,5 +1,6 @@
 """jellyfin-ondemand's command line (maintenance and trials), with the SAME configuration as the service.
 
+    docker compose exec ondemand python3 -m ondemand.cli doctor [--network]   # check the setup; works without the service
     docker compose exec ondemand python3 -m ondemand.cli status
     docker compose exec ondemand python3 -m ondemand.cli providers          # what each provider can do
     docker compose exec ondemand python3 -m ondemand.cli preview [--provider NAME] [--title TEXT] [--detail]
@@ -45,6 +46,13 @@ def _reasons(discards, top=12):
 
 
 # ---------------------------------------------------------------- commands
+def doctor_cmd(args):
+    from . import doctor
+    r = doctor.run(args.config, args.secrets, network=args.network)
+    print(r.text())
+    raise SystemExit(1 if r.failed else 0)
+
+
 def status(args):
     app = _app()
     for r in app.db.all("SELECT kind, state, count(*) n FROM titles GROUP BY kind, state"):
@@ -241,6 +249,11 @@ def main():
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     p = argparse.ArgumentParser(prog="ondemand")
     sub = p.add_subparsers(dest="cmd", required=True)
+    d = sub.add_parser("doctor", help="check the whole setup and say what to fix (works even if the service cannot start)")
+    d.add_argument("--network", action="store_true", help="also read every provider's feed")
+    d.add_argument("--config", help="default: $ONDEMAND_CONFIG or /config/config.toml")
+    d.add_argument("--secrets", help="default: $ONDEMAND_SECRETS or /config/secrets.toml")
+    d.set_defaults(f=doctor_cmd)
     sub.add_parser("status").set_defaults(f=status)
     sub.add_parser("providers", help="the configured providers and what each can do").set_defaults(f=providers_cmd)
     pv = sub.add_parser("preview", help="only reads: what the feeds would put in the catalog")
@@ -277,6 +290,8 @@ def main():
     m.set_defaults(f=add_manual)
     sub.add_parser("rewrite-strm", help="after changing [gateway] public_url").set_defaults(f=rewrite_strm)
     args = p.parse_args()
+    if args.cmd == "doctor":
+        logging.getLogger().setLevel(logging.WARNING)      # the report is the output; no INFO log lines in it
     args.f(args)
 
 

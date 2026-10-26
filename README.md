@@ -158,9 +158,17 @@ docker compose -f docker/compose.example.yml up -d --build
    docker compose -f docker/compose.example.yml exec ondemand python3 -m ondemand.cli import
    ```
 
+Then check everything at once: `docker compose -f docker/compose.example.yml run --rm ondemand python3 -m ondemand.cli doctor`
+prints one line per check and says how to fix whatever fails.
+
 Already running Jellyfin and qBittorrent? Keep only the `ondemand` service: [docs/jellyfin-setup.md](docs/jellyfin-setup.md).
 
 </details>
+
+> [!TIP]
+> **Using [Claude Code](https://claude.com/claude-code)?** The repository ships a project skill
+> (`.claude/skills/jellyfin-ondemand`). Open the folder and ask it to set things up, add your Prowlarr
+> or find out why a title does not play: it runs `cli doctor` and fixes what fails.
 
 The example config ships with one provider, the Internet Archive's public-domain films, so you can
 watch the whole flow work before adding your own.

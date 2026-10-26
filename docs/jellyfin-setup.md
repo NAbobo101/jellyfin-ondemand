@@ -2,6 +2,10 @@
 
 Tested with Jellyfin **10.11** and qBittorrent **4.6** (qBittorrent 5 renamed parts of its WebUI API).
 
+Already running Jellyfin and qBittorrent? Use `docker/compose.ondemand-only.yml` (ondemand alone,
+ports 8097/8098 published; paths in `docker/.env`). Do not start the full example stack next to them:
+its Jellyfin, qBittorrent and Caddy would take the same ports.
+
 ## 1. Paths: who sees what
 
 | Folder | jellyfin-ondemand | Jellyfin | qBittorrent |
@@ -69,7 +73,11 @@ Set `[subtitles] language` (e.g. `"pt-BR"`, `"es"`) and a SubDL key. Each new `.
 subtitle; the real one is fetched when the torrent starts and swapped in without restarting the video.
 Set Jellyfin's subtitle preferences per user as usual.
 
-## 6. Monitoring (optional)
+## 6. Check it
+
+`python3 -m ondemand.cli doctor` checks every item of this page and prints how to fix what fails.
+
+## 7. Monitoring (optional)
 
 `GET :8097/metrics` (from `admin_clients`) exposes Prometheus metrics: starts, blocks, first-byte
 timeouts, piece waits, active streams, torrents per state, pending catalog titles, search requests.
