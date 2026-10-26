@@ -1,0 +1,16 @@
+# local configuration and secrets — never commit
+config.toml
+secrets.toml
+*.secret.toml
+data/
+.e2e/
+plugins/*
+!plugins/README.md
+
+# editor / runtime noise
+__pycache__/
+*.pyc
+*.bak-*
+*.log
+.venv/
+node_modules/
