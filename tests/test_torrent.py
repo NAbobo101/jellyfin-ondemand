@@ -166,6 +166,21 @@ class TestStart(unittest.TestCase):
         self.assertTrue(info["foreign"])
         self.assertEqual(qb.calls, [])
 
+    def test_a_refused_new_torrent_is_deleted_from_qbittorrent(self):
+        qb = FakeQBit()
+        qb.deleted = []
+        qb.delete = lambda hashes, with_files=True: qb.deleted.extend(hashes)
+        bad = TorrentMeta("a" * 40, "F", 1 << 22, 600, [TorrentFile(VIDEO, 2_000_000_000, 0),
+                                                          TorrentFile("F/setup.exe", 1_000, 2_000_000_000)], False)
+        with mock.patch("ondemand.torrent.read_torrent", return_value=bad), self.assertRaises(Unavailable):
+            torrent.start(qb, "rid1", "https://tracker.example/t", CFG, infohash="A" * 40, public=True)
+        self.assertEqual(qb.deleted, ["a" * 40])
+        qb.deleted = []
+        qb.torrents["a" * 40] = qb._t("a" * 40, "ondemand,od-rid1")      # already ours before: never deleted here
+        with mock.patch("ondemand.torrent.read_torrent", return_value=bad), self.assertRaises(Unavailable):
+            torrent.start(qb, "rid1", "https://tracker.example/t", CFG, infohash="A" * 40, public=True)
+        self.assertEqual(qb.deleted, [])
+
     def test_without_add_nothing_is_fetched_from_here(self):
         qb = FakeQBit(accepts_add=False)
         with mock.patch("urllib.request.urlopen") as net, self.assertRaises(Unavailable):

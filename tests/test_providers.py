@@ -171,6 +171,8 @@ class TestArchiveOrg(unittest.TestCase):
         i = got[0]
         self.assertEqual(i.torrent_url, "https://archive.org/download/night_of_the_living_dead/night_of_the_living_dead_archive.torrent")
         self.assertEqual((i.private, i.resolutions, i.kind), (False, ["SD", "720p", "1080p"], "movie"))
+        self.assertTrue(p.trusted)
+        self.assertFalse(ArchiveOrg("ia2", {"trusted": False}).trusted)
         from ondemand.release_name import parse_movie
         self.assertEqual(parse_movie(i.title)[0]["raw_name"], "Night of the Living Dead")
 

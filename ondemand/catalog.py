@@ -155,7 +155,7 @@ class Catalog:
                     self.db.execute("UPDATE titles SET state='error' WHERE id=?", t["id"])
         if folders:
             self.jf.notify_paths([self.to_jellyfin(p) for p in folders])
-            log.info("catalog: %d series written and announced to Jellyfin", n)
+            log.info("%d series written and announced to Jellyfin", n)
         return n
 
     def write_series(self, tid):
@@ -224,7 +224,7 @@ class Catalog:
                     self.db.execute("UPDATE titles SET state='error' WHERE id=?", t["id"])
         if folders:
             self.jf.notify_paths([self.to_jellyfin(p) for p in folders])
-            log.info("catalog: %d new titles (%d folders) written and announced to Jellyfin", n, len(folders))
+            log.info("%d new titles (%d folders) written and announced to Jellyfin", n, len(folders))
         return n
 
     def write_title(self, tid):
@@ -240,7 +240,7 @@ class Catalog:
         for p in folders:
             if not self.jf.refresh_folder(os.path.dirname(self.to_jellyfin(p))):
                 self.jf.notify_paths([self.to_jellyfin(p)])
-        log.info("catalog: %s (%s) written on request (%d folders)", t["name"], t["year"], len(folders))
+        log.info("%s (%s) written on request (%d folders)", t["name"], t["year"], len(folders))
         return self.main_strm(tid)
 
     def main_strm(self, tid):
@@ -287,6 +287,6 @@ class Catalog:
                 self.db.execute("UPDATE titles SET locked=-1 WHERE id=?", tid)
                 gave_up += 1
         if n or gave_up:
-            log.info("catalog: %d title(s) locked (LockData) after identification%s", n,
+            log.info("%d title(s) locked (LockData) after identification%s", n,
                      f"; {gave_up} without IMDb after {give_up_h} h left the queue" if gave_up else "")
         return n

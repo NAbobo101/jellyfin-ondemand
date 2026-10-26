@@ -107,6 +107,7 @@ root = ""                           # e.g. "/abr": ladders made by tools/generat
 name = "internet-archive"
 type = "archive_org"
 private = false
+trusted = true                      # skip the public-torrent file check (its torrents carry .js/.xml metadata)
 collection = "feature_films"
 rows = 50
 

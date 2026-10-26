@@ -51,6 +51,8 @@ per-provider resolution override.
   `[providers.<name>]` (falls back to an option of the same name); `self.require("url", "api_key")`
   stops at start-up with a clear message.
 - `self.private`, `self.seed_rule` — from `private = …` and `seed = {min_hours, min_ratio, either}`.
+- `self.trusted` — from `trusted = true`: public torrents of this provider skip the file check (no
+  executables/archives, plausible video size). Leave it off unless the source's torrents are known good.
 - `ondemand.providers.base.Http` — a paced HTTP client (`get`, `get_json`, `post_json`) whose errors are
   `ProviderError` **without the URL** (it may contain a key). Raise `ProviderError` for any source
   failure: the registry turns it into a warning and the other providers carry on.

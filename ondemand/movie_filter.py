@@ -66,6 +66,10 @@ class MovieResolver:
     def _resolve(self, raw_name, year):
         try:
             found = self.jf.remote_search_movie(raw_name, year=year)
+            if not found:
+                # TMDb's year filter is strict: a release dated one year off (festival vs release date)
+                # finds nothing. Search again without it and keep the ±1 rule below.
+                found = self.jf.remote_search_movie(raw_name)
         except Exception as e:
             return None, f"TMDb search failed: {type(e).__name__}"
         exact = [r for r in found if r.get("ProductionYear") == year]

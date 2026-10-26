@@ -76,6 +76,22 @@ class TestResolver(unittest.TestCase):
         row = self.db.one("SELECT state, removed_at, reason, rest_released FROM torrents WHERE infohash=?", h)
         self.assertEqual(tuple(row), ("trial", None, None, 0))
 
+    def test_trusted_provider_skips_the_public_file_check(self):
+        class Reg:
+            def trusted(self, name):
+                return name == "archive"
+        self.db.execute("UPDATE releases SET provider='archive', private=0 WHERE id=?", self.rid)
+        self.s.registry = Reg()
+        with mock.patch("ondemand.service.torrent.start", side_effect=Unavailable("stop here")) as start:
+            with self.assertRaises(Unavailable):
+                self.s._start(self.rid)
+        self.assertFalse(start.call_args.kwargs["public"])
+        self.db.execute("UPDATE releases SET provider='other' WHERE id=?", self.rid)
+        with mock.patch("ondemand.service.torrent.start", side_effect=Unavailable("stop here")) as start:
+            with self.assertRaises(Unavailable):
+                self.s._start(self.rid)
+        self.assertTrue(start.call_args.kwargs["public"])
+
     def test_active_torrent_waits_for_the_piece(self):
         self.s.sources[self.rid] = FakeSource(start=True)
         r = Request()

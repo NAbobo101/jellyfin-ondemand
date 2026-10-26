@@ -185,9 +185,16 @@ def start(qbit, release_id, torrent_url, cfg, episode=None, public=False, infoha
     h = t["hash"]
     meta = read_torrent(_export(qbit, h, time.monotonic() + (cfg.get("metadata_wait_s", 40) if magnet else 0)))
     deadline = max(deadline, time.monotonic() + 10)   # waiting for metadata does not eat the priorities' deadline
-    if public:
-        check_safety(meta, min_video_mb or cfg.get("min_video_mb", 300))
-    f = choose_video(meta, episode, preferred)
+    try:
+        if public:
+            check_safety(meta, min_video_mb or cfg.get("min_video_mb", 300))
+        f = choose_video(meta, episode, preferred)
+    except Unavailable:
+        if new:
+            # Refused before any priority was set: a torrent left behind would later be "re-entered"
+            # downloading every file, and nothing in the database would ever clean it up.
+            qbit.delete([h], with_files=True)
+        raise
     qb_files = qbit.files(h)
     video = _qbit_file(qb_files, meta, f)
 

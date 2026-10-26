@@ -189,6 +189,10 @@ class Provider:
                                   min_ratio=float(seed.get("min_ratio", 1.0 if self.private else 0)),
                                   either=bool(seed.get("either", False)))
         self.resolutions = self.options.get("resolutions")
+        # trusted: skip the file check on public torrents (no executables/archives, plausible video size).
+        # Only for sources whose torrents are known to be what they say (e.g. archive.org's, which carry
+        # .js/.xml metadata files next to the video).
+        self.trusted = bool(self.options.get("trusted", False))
 
     # ------------------------------------------------------------ what a provider can do
     def feed(self):

@@ -19,7 +19,10 @@ class FakeJellyfin:
 
     def remote_search_movie(self, term, year=None, limit=8):
         self.calls += 1
-        return self.results.get(term, [])
+        found = self.results.get(term, [])
+        return [r for r in found if r.get("ProductionYear") == year] if year and self.strict_year else found
+
+    strict_year = False
 
     def imdb_from_tmdb(self, tmdb):
         return {"100": "tt0000100"}.get(str(tmdb))
@@ -91,6 +94,15 @@ class TestBuild(unittest.TestCase):
                          MovieResolver(FakeJellyfin({"Night of the Living Dead": NOTLD})), CFG)
         self.assertEqual(r["movies"], {})
         self.assertIn("Night of the Living Dead (1975)", r["quarantine"])
+
+    def test_strict_year_filter_falls_back_to_a_search_without_the_year(self):
+        jf = FakeJellyfin({"The Fast And The Furious": [
+            {"Name": "Velozes", "ProductionYear": 2001, "ProviderIds": {"Imdb": "tt0232500"}},
+            {"Name": "The Fast and the Furious", "ProductionYear": 1954, "ProviderIds": {"Imdb": "tt0047034"}}]})
+        jf.strict_year = True                         # like TMDb: year=1955 finds nothing
+        r = build_movies([item("The Fast And The Furious 1955 WEB-archive", resolutions=["SD"])], MovieResolver(jf), CFG)
+        self.assertEqual(list(r["movies"]), ["tt0047034"])
+        self.assertEqual(jf.calls, 2)
 
     def test_tmdb_only_id_is_converted(self):
         r = build_movies([item("Some Movie 2020 1080p WEB-DL x264-G", ids={"tmdb": "100"})],

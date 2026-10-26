@@ -46,9 +46,10 @@ class Service:
     Several almost simultaneous connections for the same release start a single torrent.
     """
 
-    def __init__(self, cfg, db, qbit, jellyfin, metrics, subtitler=None, lang=None):
+    def __init__(self, cfg, db, qbit, jellyfin, metrics, subtitler=None, lang=None, registry=None):
         self.cfg, self.db, self.qbit, self.jf, self.metrics = cfg, db, qbit, jellyfin, metrics
         self.subtitler = subtitler
+        self.registry = registry
         self.qcfg = {**cfg["qbittorrent"], "subtitle_pattern": lang.regex if lang else None}
         self.sources = {}         # release_id -> TorrentSource
         self.watchers = {}        # infohash -> Watcher
@@ -149,7 +150,8 @@ class Service:
             keep = {s.file.path for s in siblings if s is not None and s.readers > 0}
         try:
             info = torrent.start(self.qbit, rid, r["torrent_url"], self.qcfg, episode=episode,
-                                 public=not r["private"], infohash=r["infohash"], preferred=r["file"],
+                                 public=not r["private"] and not (self.registry and self.registry.trusted(r["provider"])),
+                                 infohash=r["infohash"], preferred=r["file"],
                                  tag=f"od-{r['torrent_tag']}" if r["torrent_tag"] else None, keep=keep,
                                  min_video_mb=self.cfg["series"]["min_video_mb"] if episode else None)
         except Unavailable:
@@ -221,7 +223,7 @@ def build(cfg):
                   jellyfin_root=c.get("jellyfin_root") or None, lang=lang)
     registry = providers.build(cfg, db, {"qbit": qbit})
     subtitler = Subtitler(db, jf, subtitle_provider(cfg, lang), lang, to_local=cat.to_local)
-    service = Service(cfg, db, qbit, jf, metrics, subtitler, lang)
+    service = Service(cfg, db, qbit, jf, metrics, subtitler, lang, registry)
     tv = TVmaze(cache_file=cfg["series"]["tvmaze_cache"])  # one: the import, requests and "complete" share pace and cache
     return SimpleNamespace(cfg=cfg, db=db, qbit=qbit, metrics=metrics, jf=jf, lang=lang, cat=cat, registry=registry,
                            subtitler=subtitler, service=service, tv=tv)

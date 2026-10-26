@@ -57,6 +57,10 @@ class Registry:
             return MANUAL.as_lifecycle()
         return None
 
+    def trusted(self, name):
+        p = self.by_name.get(name)
+        return bool(p and p.trusted)
+
     def with_capability(self, cap):
         return [p for p in self.providers if cap in p.capabilities]
 

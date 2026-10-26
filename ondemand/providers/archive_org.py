@@ -9,7 +9,8 @@
 
 archive.org publishes a .torrent for every item and seeds it itself over HTTP (web seeds),
 so these torrents always start. The films are mostly SD: the provider accepts SD on its own
-items (`resolutions`), whatever the global [movies] resolutions say.
+items (`resolutions`), whatever the global [movies] resolutions say. Its torrents carry metadata
+files (.xml, .js transcripts) next to the video, so it is `trusted` (no public-torrent file check).
 """
 
 import re
@@ -24,7 +25,7 @@ class ArchiveOrg(Provider):
     type = "archive_org"
 
     def __init__(self, name, options=None, secrets=None, context=None):
-        options = {"private": False, "resolutions": ["SD", "720p", "1080p"], **(options or {})}
+        options = {"private": False, "trusted": True, "resolutions": ["SD", "720p", "1080p"], **(options or {})}
         super().__init__(name, options, secrets, context)
         self.collection = self.option("collection", "feature_films")
         self.http = Http(pause=float(self.option("pause_s", 1.0)))
