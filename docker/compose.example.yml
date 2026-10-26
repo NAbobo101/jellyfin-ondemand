@@ -1,0 +1,57 @@
+# jellyfin-ondemand — a complete example stack: Jellyfin + qBittorrent + jellyfin-ondemand + Caddy.
+#
+#   cp config.example.toml config/config.toml      # then edit it (providers, language…)
+#   cp secrets.example.toml config/secrets.toml && chmod 600 config/secrets.toml
+#   mkdir -p catalog downloads data && touch catalog/.ondemand-marker
+#   docker compose -f docker/compose.example.yml up -d --build
+#
+# Already running Jellyfin/qBittorrent? Keep only the `ondemand` service and point config.toml
+# at yours (see docs/jellyfin-setup.md). Paths below are relative to the repository root.
+name: ondemand
+
+services:
+  ondemand:
+    build: {context: .., dockerfile: docker/Dockerfile}
+    image: jellyfin-ondemand:local
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - ../config:/config:ro                 # config.toml + secrets.toml (600)
+      - ../data:/data                        # SQLite database, TVmaze cache
+      - ../catalog:/catalog                  # the .strm catalog (also mounted in Jellyfin)
+      - ../downloads:/downloads:ro           # qBittorrent's downloads, read-only here
+      # - ../plugins:/plugins:ro             # your own providers (docs/writing-a-provider.md)
+      # - /path/to/abr:/abr:ro               # pre-generated ladders ([abr] root = "/abr")
+    restart: unless-stopped
+    mem_limit: 256m
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
+  jellyfin:
+    image: jellyfin/jellyfin:10.11.11        # tested with 10.11; pin a version
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+      - ../catalog:/catalog:ro               # add /catalog/Movies, /catalog/Movies 4K, /catalog/Series to libraries
+      # - /path/to/your/media:/media:ro
+    # devices: ["/dev/dri:/dev/dri"]         # hardware transcoding (strongly recommended)
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:4.6.7
+    environment: {PUID: "${PUID:-1000}", PGID: "${PGID:-1000}", TZ: "${TZ:-Etc/UTC}", WEBUI_PORT: "8080"}
+    volumes:
+      - qbittorrent-config:/config
+      - ../downloads:/downloads
+    ports: ["6881:6881", "6881:6881/udp"]     # the WebUI stays inside the network (http://qbittorrent:8080)
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8
+    volumes: [./Caddyfile:/etc/caddy/Caddyfile:ro]
+    ports: ["8096:8096"]                     # open Jellyfin at http://<host>:8096
+    restart: unless-stopped
+
+volumes:
+  jellyfin-config:
+  jellyfin-cache:
+  qbittorrent-config:

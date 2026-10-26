@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: unit tests (standard library only)
+        run: python3 -I -m unittest discover -s tests -t .
+      - name: shell scripts
+        run: bash -n web/install-script.sh tools/generate-abr.sh
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: syntax
+        run: for f in web/*.js web/extras/*.js; do node --check "$f"; done
+      - name: tests
+        run: |
+          npm install --no-save --no-audit --no-fund jsdom@24.1.3
+          node web/tests/search.test.js
+          node web/tests/abr.test.js
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build the image
+        run: docker build -f docker/Dockerfile -t jellyfin-ondemand:ci .

@@ -1,0 +1,4 @@
+*
+!ondemand/
+!tools/
+**/__pycache__

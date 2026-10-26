@@ -60,7 +60,6 @@ DEFAULTS = {
         "max_gb": 40, "max_gb_4k": 80,
         "allowed_language_tags": [],   # e.g. ["SPANISH", "LATINO"]: release tags that are NOT foreign to you
         "prefer_sdr": True,            # an HDR/DV release only wins when there is no SDR one
-        "months_unplayed": 12,         # never-played catalog titles leave after this (not implemented yet)
     },
     "series": {
         "enabled": True, "tvmaze_cache": "/data/tvmaze-cache.json",

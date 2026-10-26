@@ -1,0 +1,11 @@
+# One origin for Jellyfin and the search API: web/search.js and web/abr.js call /ondemand/… on the
+# same address the browser uses for Jellyfin. Use your own reverse proxy instead if you have one —
+# the rule is the same: /ondemand/* -> ondemand:8098, everything else -> jellyfin:8096.
+:8096 {
+	handle /ondemand/* {
+		reverse_proxy ondemand:8098
+	}
+	handle {
+		reverse_proxy jellyfin:8096
+	}
+}

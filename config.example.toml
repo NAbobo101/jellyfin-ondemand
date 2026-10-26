@@ -1,0 +1,146 @@
+# jellyfin-ondemand — configuration. Copy to config/config.toml and edit.
+# Every key below shows its DEFAULT; delete what you do not change. Secrets go in secrets.toml.
+# All the defaults live in ondemand/config.py.
+
+[general]
+database = "/data/ondemand.db"
+log_level = "INFO"
+plugins_dir = "/plugins"            # your own providers: type = "python", class = "module:Class"
+
+[gateway]
+port = 8097
+# What goes inside every .strm: this service's address AS JELLYFIN REACHES IT.
+# Changing it later: `python3 -m ondemand.cli rewrite-strm`.
+public_url = "http://ondemand:8097"
+video_clients = ["jellyfin"]        # who may read /v/<id>: IPs, CIDRs or host names (compose service names)
+admin_clients = ["127.0.0.1"]       # /metrics (Prometheus)
+first_byte_wait_s = 60              # PlaybackInfo's probe: how long a cold torrent may take to deliver the start
+play_wait_s = 90
+block_s = 120                       # after a failed probe, refuse that release for this long (avoids a blind CPU transcode)
+stall_wait_s = 900                  # mid-video, wait this long for a missing piece
+
+[jellyfin]
+url = "http://jellyfin:8096"
+message_header = "On demand"        # title of the messages shown on the player
+
+[qbittorrent]
+url = "http://qbittorrent:8080"
+save_path = "/downloads/ondemand"   # where catalog torrents go, AS QBITTORRENT SEES IT
+# qBittorrent's paths -> this container's paths. Include the incomplete folder if you use one,
+# and the folders of your own torrents (an existing torrent is reused, never deleted).
+path_map = { "/downloads" = "/downloads" }
+category = "ondemand"
+torrent_wait_s = 20
+metadata_wait_s = 40                # magnet links: time to fetch the metadata
+min_video_mb = 300                  # public torrents: smaller videos are refused as fakes
+
+[catalog]
+root = "/catalog"                   # must contain an empty file named .ondemand-marker
+jellyfin_root = ""                  # the same folder as Jellyfin sees it ("" = same path)
+movies = "Movies"                   # add <root>/Movies to your Movies library ("" = off)
+movies_4k = "Movies 4K"             # a separate library: one version per item (see docs/architecture.md)
+series = "Series"                   # add <root>/Series to your Shows library
+batch = 10                          # titles written per round, only while nobody is watching
+series_batch = 5
+interval_min = 2
+import_interval_h = 6               # how often every provider's feed() is read
+
+[movies]
+enabled = true
+resolutions = ["2160p", "1080p", "720p"]   # add "SD" to accept lower resolutions
+seeds_min = 1
+public_seeds_min = 2
+freeleech_min = 100                 # private trackers: only freeleech (100 = the download does not count)
+max_gb = 40
+max_gb_4k = 80
+allowed_language_tags = []          # e.g. ["SPANISH", "LATINO"]: release tags that are not "foreign" to you
+prefer_sdr = true                   # HDR only wins when there is no SDR release
+
+[series]
+enabled = true
+tvmaze_cache = "/data/tvmaze-cache.json"
+resolutions = ["1080p", "720p"]
+seeds_min = 1
+public_seeds_min = 2
+freeleech_min = 100
+pack_max_gb = 60
+single_max_gb = 8
+allowed_language_tags = []
+min_video_mb = 100
+complete_days = 7                   # opening a catalog series looks for missing episodes at most this often
+
+[lifecycle]
+interval_s = 30
+commit_minutes = 15                 # public torrent watched this long -> downloads to the end
+abandon_minutes = 10                # public torrent stopped earlier and left alone this long -> deleted
+days_unwatched = 2                  # seed rule met + unwatched this long -> deleted
+days_with_position = 14             # someone stopped midway ("continue watching"): kept up to this long
+throttle_others_kbs = 300           # other downloads while a catalog title plays and still downloads
+
+[subtitles]
+language = ""                       # BCP 47, e.g. "pt-BR", "es", "fr" ("" = no subtitles); see ondemand/languages.py
+provider = "subdl"                  # api_key in secrets.toml [subdl]
+interval_h = 6
+max_attempts = 56
+
+[search]                            # web/search.js: "search outside the library"
+enabled = true
+port = 8098
+daily_limit = 10                    # requests per user per day (administrators: unlimited)
+check_availability = true           # only show movies that some provider has
+cache_min = 60
+library_cache_min = 30
+tmdb_max = 5
+max_results = 24
+item_wait_s = 300
+metadata_wait_s = 45
+
+[abr]
+root = ""                           # e.g. "/abr": ladders made by tools/generate-abr.sh ("" = off)
+
+# ------------------------------------------------------------------ providers
+# Where torrents come from. None is built in on purpose: add the ones you are allowed to use.
+# Run `python3 -m ondemand.cli providers` and `… preview` after adding one.
+
+# Public-domain films from the Internet Archive — a safe first test.
+[[providers]]
+name = "internet-archive"
+type = "archive_org"
+private = false
+collection = "feature_films"
+rows = 50
+
+# Any indexer through Prowlarr or Jackett (Torznab). secrets.toml: [providers.my-indexer] api_key
+# [[providers]]
+# name = "my-indexer"
+# type = "torznab"
+# url = "http://prowlarr:9696/1/api"
+# private = true
+# seed = { min_hours = 0, min_ratio = 1.0 }
+# movie_categories = [2000]
+# series_categories = [5000]
+
+# A private tracker running UNIT3D. secrets.toml: [providers.my-unit3d] api_token
+# [[providers]]
+# name = "my-unit3d"
+# type = "unit3d"
+# url = "https://tracker.example"
+# private = true
+# seed = { min_hours = 72, min_ratio = 1.0, either = true }
+# movie_categories = [1]
+# series_categories = [2]
+
+# An RSS feed registered in qBittorrent's RSS reader (the passkey stays in qBittorrent).
+# [[providers]]
+# name = "my-rss"
+# type = "qbit_rss"
+# folder = "ondemand"
+# feeds = ["My Tracker"]
+# private = true
+# seed = { min_ratio = 1.0 }
+
+# Your own code: plugins/my_provider.py with class MyProvider(ondemand.providers.Provider)
+# [[providers]]
+# name = "mine"
+# type = "python"
+# class = "my_provider:MyProvider"
