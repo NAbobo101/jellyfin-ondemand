@@ -49,10 +49,10 @@ Config keys (`grep -n -A12 '^\[gateway\]' config.example.toml` etc. for the exac
 
 | Key | Value |
 |---|---|
-| `[jellyfin] url` | Jellyfin as seen from the ondemand container, e.g. `http://192.168.1.10:8096` |
+| `[jellyfin] url` | Jellyfin as seen from the ondemand container, e.g. `http://<server-ip>:8096` |
 | `[gateway] public_url` | ondemand as seen from Jellyfin: `http://<this host>:8097` (written in every `.strm`; change later → `cli rewrite-strm`) |
 | `[gateway] video_clients` | Jellyfin's source IP: its LAN IP, or for a Jellyfin on the same host the Docker bridge range `["172.16.0.0/12"]`. A refused request logs `request from <ip> refused` → add that IP |
-| `[qbittorrent] url` | WebUI from ondemand, e.g. `http://192.168.1.10:8080` |
+| `[qbittorrent] url` | WebUI from ondemand, e.g. `http://<server-ip>:8080` |
 | `[qbittorrent] save_path` | qBittorrent's own path for catalog torrents, e.g. `/data/torrents/ondemand` |
 | `[qbittorrent] path_map` | `{ "<qBittorrent path prefix>" = "/downloads" }` (+ incomplete folder) |
 | `[catalog] jellyfin_root` | the catalog's path inside Jellyfin, e.g. `/media/ondemand` |
