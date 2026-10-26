@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from ondemand.gateway import AccessList, Gateway, NotFound
 from ondemand.sources import FileSource, SimulatedSource, Unavailable
@@ -158,13 +159,21 @@ class TestAccess(GatewayBase):
 
 class TestAccessList(unittest.TestCase):
     def test_ip_cidr_and_name(self):
-        acl = AccessList(["10.0.0.5", "172.20.0.0/16", "localhost"])
-        self.assertIn("10.0.0.5", acl)
-        self.assertIn("172.20.3.4", acl)
-        self.assertIn("127.0.0.1", acl)                  # resolved from the host name
-        self.assertIn("::ffff:10.0.0.5", acl)            # IPv4-mapped IPv6
-        self.assertNotIn("10.0.0.6", acl)
-        self.assertNotIn("not-an-ip", acl)
+        # the name is resolved through a fake DNS: a real lookup of "localhost" is not reliable on CI runners
+        dns = {"jellyfin": ("jellyfin", [], ["10.9.0.6"])}
+        acl = AccessList(["10.0.0.5", "172.20.0.0/16", "jellyfin"])
+        with mock.patch("ondemand.gateway.socket.gethostbyname_ex", side_effect=lambda n: dns[n]):
+            self.assertIn("10.0.0.5", acl)
+            self.assertIn("172.20.3.4", acl)
+            self.assertIn("10.9.0.6", acl)                   # resolved from the host name
+            self.assertIn("::ffff:10.0.0.5", acl)            # IPv4-mapped IPv6
+            self.assertNotIn("10.0.0.6", acl)
+            self.assertNotIn("not-an-ip", acl)
+
+    def test_a_name_that_does_not_resolve_lets_nobody_in(self):
+        acl = AccessList(["jellyfin"])
+        with mock.patch("ondemand.gateway.socket.gethostbyname_ex", side_effect=OSError("no such host")):
+            self.assertNotIn("10.9.0.6", acl)
 
 
 if __name__ == "__main__":
