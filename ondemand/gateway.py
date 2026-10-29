@@ -49,12 +49,14 @@ class AccessList:
                 self.nets.append(ipaddress.ip_network(str(e), strict=False))
             except ValueError:
                 self.names.append(str(e))
-        self._resolved, self._at = set(), 0.0
+        # None, not 0.0: time.monotonic() counts from boot, so on a machine up for less than `ttl`
+        # seconds (a fresh CI runner) "now - 0.0 > ttl" was false and the names were never resolved.
+        self._resolved, self._at = set(), None
         self._lock = threading.Lock()
 
     def _names(self):
         with self._lock:
-            if self.names and time.monotonic() - self._at > self.ttl:
+            if self.names and (self._at is None or time.monotonic() - self._at > self.ttl):
                 found = set()
                 for n in self.names:
                     try:

@@ -170,6 +170,13 @@ class TestAccessList(unittest.TestCase):
             self.assertNotIn("10.0.0.6", acl)
             self.assertNotIn("not-an-ip", acl)
 
+    def test_names_resolve_right_after_boot(self):
+        dns = {"jellyfin": ("jellyfin", [], ["10.9.0.6"])}
+        acl = AccessList(["jellyfin"])
+        with mock.patch("ondemand.gateway.socket.gethostbyname_ex", side_effect=lambda n: dns[n]), \
+                mock.patch("ondemand.gateway.time.monotonic", return_value=5.0):       # machine up for 5 s
+            self.assertIn("10.9.0.6", acl)
+
     def test_a_name_that_does_not_resolve_lets_nobody_in(self):
         acl = AccessList(["jellyfin"])
         with mock.patch("ondemand.gateway.socket.gethostbyname_ex", side_effect=OSError("no such host")):
