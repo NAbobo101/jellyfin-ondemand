@@ -10,9 +10,10 @@ import threading
 import time
 from types import SimpleNamespace
 
-from . import config, languages, movie_filter, series_filter, series_ondemand, torrent
+from . import archive, config, languages, movie_filter, release_name, series_filter, series_ondemand, torrent
 from .catalog import Catalog
 from .db import Database
+from .fallback import Fallback
 from .gateway import Gateway, Metrics, NotFound
 from .jellyfin import Jellyfin
 from .lifecycle import Lifecycle
@@ -21,7 +22,7 @@ from .providers import registry as providers
 from .qbit import QBit
 from .search import Search, SearchAPI
 from .search_series import SeriesSearch
-from .sources import Unavailable
+from .sources import BadTorrent, Unavailable
 from .subtitles.subdl import SubDL
 from .subtitles.subtitler import Subtitler
 from .tvmaze import TVmaze
@@ -56,6 +57,7 @@ class Service:
         self.starting = {}        # release_id -> Event
         self.failures = {}        # release_id -> time of the last failed probe
         self.lock = threading.Lock()
+        self.fallback = None      # Fallback (fallback.py): an episode's torrent that does not play -> next candidate
 
     def forget(self, rid):
         """The lifecycle deleted the torrent (or it vanished): the next play starts from scratch. The
@@ -77,6 +79,21 @@ class Service:
             self.failures[rid] = now
         log.warning("probe of %s failed: its requests are blocked for %ds (avoids a blind transcode)",
                     rid, self.cfg["gateway"]["block_s"])
+        if self.fallback is not None and rid in self.sources:
+            threading.Thread(target=self._empty_swarm, args=(rid,), name=f"swarm-{rid}", daemon=True).start()
+
+    def _empty_swarm(self, rid):
+        """A probe that timed out with no seeder at all and nothing downloaded: a failure of the archived item
+        (the 2nd, 30 min or more later, sends the episode to the fallback). A slow but alive torrent does not count."""
+        h = getattr(getattr(self.sources.get(rid), "watcher", None), "hash", None)
+        if h is None:
+            return
+        try:
+            t = self.qbit.one(h)
+        except Exception:
+            return
+        if t and not t.get("downloaded") and not t.get("num_seeds") and (t.get("num_complete") or 0) <= 0:
+            self.fallback.failed(rid, "empty swarm (no seeder, nothing downloaded)", severe=False)
 
     def resolver(self, rid, request):
         g = self.cfg["gateway"]
@@ -154,6 +171,10 @@ class Service:
                                  infohash=r["infohash"], preferred=r["file"],
                                  tag=f"od-{r['torrent_tag']}" if r["torrent_tag"] else None, keep=keep,
                                  min_video_mb=self.cfg["series"]["min_video_mb"] if episode else None)
+        except BadTorrent as e:     # the torrent is the problem: counts in the archive (and may go to the fallback)
+            if self.fallback is not None:
+                self.fallback.failed(rid, str(e), e.severe)
+            raise
         except Unavailable:
             raise
         except Exception as e:      # qBittorrent down, network: becomes a 503 before the headers
@@ -225,6 +246,7 @@ def build(cfg):
     subtitler = Subtitler(db, jf, subtitle_provider(cfg, lang), lang, to_local=cat.to_local)
     service = Service(cfg, db, qbit, jf, metrics, subtitler, lang, registry)
     tv = TVmaze(cache_file=cfg["series"]["tvmaze_cache"])  # one: the import, requests and "complete" share pace and cache
+    service.fallback = Fallback(cfg, db, qbit, tv, cat, metrics, service)
     return SimpleNamespace(cfg=cfg, db=db, qbit=qbit, metrics=metrics, jf=jf, lang=lang, cat=cat, registry=registry,
                            subtitler=subtitler, service=service, tv=tv)
 
@@ -236,7 +258,8 @@ def watchdog_prom(cfg):
 
 def prepare_metrics(metrics, db, service, cfg):
     """Counters that alerts use are born at 0; gauges of the current state are computed on every scrape."""
-    for name in ("starts_total", "blocks_total", "first_byte_timeouts_total", "piece_waits_total", "searches_total"):
+    for name in ("starts_total", "blocks_total", "first_byte_timeouts_total", "piece_waits_total", "searches_total",
+                 "fallbacks_used_total"):
         metrics.zero(name)
     for result in ("ready", "error", "limit"):
         metrics.zero("search_requests_total", result=result)
@@ -247,6 +270,9 @@ def prepare_metrics(metrics, db, service, cfg):
         for r in db.all("SELECT state, count(*) n FROM torrents WHERE state<>'removed' GROUP BY state"):
             m.set("torrents", r["n"], state=r["state"])
         m.set("catalog_pending", db.one("SELECT count(*) n FROM titles WHERE state='new'")["n"])
+        m.clear("archive_series")
+        for r in db.all("SELECT state, count(*) n FROM archive WHERE kind='series' GROUP BY state"):
+            m.set("archive_series", r["n"], state=r["state"])
     metrics.collectors.append(current_state)
     metrics.files.append(watchdog_prom(cfg))
 
@@ -279,10 +305,21 @@ def import_movies(app, candidates):
     return len(r["movies"])
 
 
-def import_series(app, candidates):
+def import_series(app, candidates, everything=False):
     """Series filter -> database. The catalog writes the .strm files bit by bit, with nobody watching.
-    An episode that already exists in a local series is not registered (only gaps are filled)."""
+    An episode that already exists in a local series is not registered (only gaps are filled).
+
+    The filter gets what the feeds show now (already archived by the registry) plus what the archive has to
+    re-evaluate (new items and quarantine whose turn came, `[series] reevaluate_names` series per round;
+    `everything` = no limit): an episode left out because TVmaze did not list its season yet comes in once
+    TVmaze does, even months after the item left the feed. The filter's decision goes back to the archive."""
     sc = app.cfg["series"]
+    live = len(candidates)
+    seen = {(c["provider"], str(c["id"])) for c in candidates}
+    in_catalog = {release_name.normalize(r["name"]) for r in app.db.all("SELECT name FROM titles WHERE kind='series'")}
+    stored = [c for c in archive.pending(app.db, None if everything else sc["reevaluate_names"], priority=in_catalog)
+              if (c["provider"], str(c["id"])) not in seen]
+    candidates = list(candidates) + stored
     local = app.jf.local_episodes(catalog_prefix=app.cat.jellyfin_prefix)
     try:
         r = series_filter.build_catalog(candidates, series_filter.Resolver(app.tv), sc, local)
@@ -291,6 +328,9 @@ def import_series(app, candidates):
     for problem in series_filter.check(r):
         log.error("series: %s — nothing registered this round", problem)
         return 0
+    archive.record_result(app.db, r)
+    count = "SELECT count(*) n FROM releases r JOIN titles t ON t.id=r.title_id WHERE t.kind='series'"
+    before = app.db.one(count)["n"]
     n_series = n_eps = 0
     for s in r["series"].values():
         eps = [series_ondemand.episode_release(e["winner"], t, n) for t, season in s["seasons"].items()
@@ -299,13 +339,14 @@ def import_series(app, candidates):
             app.cat.register_series(s["series"], eps)
             n_series += 1
             n_eps += len(eps)
-    log.info("series: %d candidates, %d series and %d episodes registered, %d in quarantine (%d TVmaze requests)",
-             len(candidates), n_series, n_eps, len(r["quarantine"]), app.tv.requests)
+    log.info("series: %d candidates (%d live + %d from the archive), %d series and %d episodes registered (%d new in "
+             "the catalog), %d in quarantine (%d TVmaze requests)", len(candidates), live, len(stored), n_series, n_eps,
+             app.db.one(count)["n"] - before, len(r["quarantine"]), app.tv.requests)
     return n_eps
 
 
-def import_catalog(app):
-    """Every provider's feed, once, through both filters."""
+def import_catalog(app, everything=False):
+    """Every provider's feed, once, through both filters (`everything`: the whole series archive too)."""
     items, warnings = app.registry.feed()
     if warnings:
         log.warning("import: %s", "; ".join(warnings))
@@ -313,7 +354,7 @@ def import_catalog(app):
     if app.cfg["movies"]["enabled"]:
         import_movies(app, [c for c in cands if c["kind"] != "series"])
     if app.cfg["series"]["enabled"] and app.cat.series:
-        import_series(app, [c for c in cands if c["kind"] != "movie"])
+        import_series(app, [c for c in cands if c["kind"] != "movie"], everything)
 
 
 def retry_subtitles(cfg, db, subtitler, pause_s=5):
@@ -339,8 +380,10 @@ def schedule(app):
     # same period as the age, attempts fell every 2× interval.
     if app.lang is not None:
         _loop("subtitles", 3600, lambda: retry_subtitles(cfg, app.db, app.subtitler), 120)
-    if len(app.registry.with_capability("feed")):
+    # Also without feeds: the series archive (search results) still has quarantine to re-evaluate.
+    if len(app.registry.with_capability("feed")) or (cfg["series"]["enabled"] and app.cat.series):
         _loop("import", c["import_interval_h"] * 3600, lambda: import_catalog(app), 60)
+        _loop("collect", cfg["series"]["collect_min"] * 60, app.registry.collect, 1800)
     log.info("scheduler: lifecycle every %ds, catalog every %d min, import every %d h from %d provider(s)",
              cfg["lifecycle"]["interval_s"], c["interval_min"], c["import_interval_h"],
              len(app.registry.with_capability("feed")))

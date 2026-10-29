@@ -26,6 +26,16 @@ class Unavailable(Exception):
     The gateway answers 503 — only before the headers have been sent."""
 
 
+class BadTorrent(Unavailable):
+    """The problem is the torrent, not the moment: counts as a failure of the archived item (fallback.py).
+    `severe` (fake, no video for the episode) = dead at once; otherwise (magnet without metadata, a tracker
+    that does not hand out the .torrent) only on the 2nd failure at least 30 min after the first."""
+
+    def __init__(self, message, severe=False):
+        super().__init__(message)
+        self.severe = severe
+
+
 def mime_of(path):
     ext = os.path.splitext(path)[1].lower()
     return MIME.get(ext) or mimetypes.guess_type(path)[0] or "application/octet-stream"

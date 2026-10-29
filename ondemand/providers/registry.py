@@ -74,20 +74,27 @@ class Registry:
             return [], f"{p.name}: {type(e).__name__}"
 
     # ------------------------------------------------------------ the three entry points
-    def feed(self, kind=None):
-        """(items, warnings) from every provider with a feed. Feed-only providers (no search for that kind)
-        have their items archived, so searches can find them later."""
+    def feed(self, kind=None, providers=None):
+        """(items, warnings) from every provider with a feed (or only `providers`). Every item is archived:
+        feed-only providers are searched there by name later, and a series item the filter could not use yet
+        (or that a source takes down) is never lost (archive.py)."""
         items, warnings = [], []
-        for p in self.with_capability("feed"):
+        for p in providers if providers is not None else self.with_capability("feed"):
             got, w = self._run(p, "feed", p.feed)
             if w:
                 warnings.append(w)
-            if self.db is not None and not ({"movie", "series"} <= p.capabilities):
+            if self.db is not None:
                 n = archive.record(self.db, got)
                 if n:
                     log.info("provider %s: %d new item(s) archived", p.name, n)
             items += [i for i in got if kind is None or i.kind in (None, kind)]
         return items, warnings
+
+    def collect(self):
+        """Archive only (no filters, no TVmaze): the feeds of feed-only providers, whose items vanish from the
+        feed after a while. Run more often than the import, so a service down for a day loses nothing."""
+        feed_only = [p for p in self.with_capability("feed") if not ({"movie", "series"} & p.capabilities)]
+        return self.feed(providers=feed_only) if feed_only else ([], [])
 
     def _from_archive(self, p, cap, name, kind):
         if self.db is None or cap in p.capabilities or "feed" not in p.capabilities:
@@ -106,6 +113,9 @@ class Registry:
         return items, warnings
 
     def search_series(self, query, progress=None):
+        """Fresh results of every provider that searches series, archived, plus everything the archive has of
+        the series (any provider, by name or ids; dead torrents left out) — including items a source no
+        longer shows. Fresh seeds win over archived ones."""
         items, warnings = [], []
         searchers = [p for p in self.providers if "series" in p.capabilities]
         for i, p in enumerate(searchers, 1):
@@ -114,8 +124,12 @@ class Registry:
             got, w = self._run(p, "search_series", p.search_series, query)
             items += got
             warnings += [w] if w else []
-        for p in self.providers:
-            items += self._from_archive(p, "series", query.name, "series")
+        if self.db is not None:
+            archive.record(self.db, items)
+            fresh = {(i.provider, archive.ident_of(i)) for i in items}
+            keys = [f"tvdb:{query.tvdb}" if query.tvdb else None, f"imdb:{query.imdb}" if query.imdb else None]
+            items += [i for i in archive.find_series(self.db, query.name, keys)
+                      if (i.provider, archive.ident_of(i)) not in fresh]
         return items, warnings
 
 

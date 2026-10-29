@@ -29,7 +29,7 @@ import time
 from .bencode import read_torrent
 from .pieces import PieceMap
 from .qbit import QBitError
-from .sources import Source, Unavailable
+from .sources import BadTorrent, Source, Unavailable
 
 log = logging.getLogger("torrent")
 
@@ -92,7 +92,7 @@ def choose_video(meta, episode=None, preferred=None):
         pattern = re.compile(rf"(s0*{s}[ ._-]*e0*{e}(?!\d)|\b0*{s}x0*{e}(?!\d))", re.I)
         videos = [f for f in videos if pattern.search(os.path.basename(f.path))]
     if not videos:
-        raise Unavailable("no matching video file in the torrent")
+        raise BadTorrent("no matching video file in the torrent", severe=True)
     return max(videos, key=lambda f: f.size)
 
 
@@ -100,10 +100,10 @@ def check_safety(meta, min_video_mb):
     """For public providers: nothing executable/archived and a plausible video size."""
     bad = [f.path for f in meta.real_files if f.path.lower().endswith(DANGEROUS)]
     if bad:
-        raise Unavailable(f"torrent refused: suspicious file {os.path.basename(bad[0])}")
+        raise BadTorrent(f"torrent refused: suspicious file {os.path.basename(bad[0])}", severe=True)
     largest = max((f.size for f in meta.real_files if f.path.lower().endswith(VIDEO)), default=0)
     if largest < min_video_mb * 1_000_000:
-        raise Unavailable("torrent refused: video too small (fake?)")
+        raise BadTorrent("torrent refused: video too small (fake?)", severe=True)
 
 
 def _qbit_file(qb_files, meta, f):
@@ -128,7 +128,7 @@ def _export(qbit, h, until):
             if e.code != 409:
                 raise
             if time.monotonic() >= until:
-                raise Unavailable("the magnet's metadata did not arrive in time (no seeders?)") from None
+                raise BadTorrent("the magnet's metadata did not arrive in time (no seeders?)") from None
             time.sleep(0.5)
 
 
@@ -179,7 +179,7 @@ def start(qbit, release_id, torrent_url, cfg, episode=None, public=False, infoha
         if not found:
             # The tracker did not deliver the .torrent, or it already exists in qBittorrent without
             # our tag and with no known infohash (RSS item): nothing is fetched from here.
-            raise Unavailable("qBittorrent did not queue the torrent (tracker down, or it already "
+            raise BadTorrent("qBittorrent did not queue the torrent (tracker down, or it already "
                               f"exists in qBittorrent without the {category} tag)")
     t = found[0]
     h = t["hash"]

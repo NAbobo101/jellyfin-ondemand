@@ -24,7 +24,12 @@ container cannot see: add that prefix to `path_map` (and mount it).
 batch of new folders can take minutes. Items are locked (`LockData`) once identified.
 
 **A series shows only some seasons.** `cli search-series "Name"` lists what each provider has and what
-is missing; TVmaze's episode list is the reference (a season TVmaze does not know yet is skipped).
+is missing; TVmaze's episode list is the reference. A season TVmaze does not list yet waits in the
+archive's quarantine and gets in by itself once TVmaze does (`cli archive --series "Name"`).
+
+**An episode does not play.** If the torrent is fake, lacks the episode or has no seeders twice in a row,
+the episode switches to the next torrent kept in the archive (same item, same `.strm`): try again. By
+hand: `cli fallback RELEASE` (the id at the end of the `.strm` URL).
 
 **Subtitles never arrive.** `[subtitles] language` set? SubDL key in `secrets.toml`? SubDL has a daily
 quota: retries happen hourly, up to `max_attempts`.

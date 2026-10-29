@@ -10,7 +10,8 @@
   stream (restored even after a kill).
 - requests: movies and series requested from Jellyfin's search (search.py) — one per IMDb id,
   with who asked (daily limit) and the item that was born.
-- archive: every item announced by feed-only providers (archive.py), to look up by name later.
+- archive: every item a provider showed (archive.py) — feeds of every provider and series search results —,
+  with its address and, for series, what the filter decided about it (winner, fallback, quarantine...).
 - series_searches: the last full search of each series (at most one per `complete_days`).
 - kv: small key/value state.
 """
@@ -118,7 +119,15 @@ def new_id():
 class Database:
     # Columns added after a schema was first created: (table, column, type). Empty for now; add
     # here when the schema grows, so existing databases are migrated in place.
-    MIGRATIONS = ()
+    MIGRATIONS = (("archive", "tag", "TEXT"), ("archive", "series_key", "TEXT"), ("archive", "season", "INTEGER"),
+                  ("archive", "state", "TEXT NOT NULL DEFAULT 'new'"), ("archive", "reason", "TEXT"),
+                  ("archive", "attempts", "INTEGER NOT NULL DEFAULT 0"), ("archive", "retry_at", "REAL"),
+                  ("archive", "failures", "INTEGER NOT NULL DEFAULT 0"), ("archive", "failed_at", "REAL"),
+                  ("archive", "evaluated_at", "REAL"))
+    # Indexes on migrated columns: created after the migration (on an old database the column is new).
+    INDEXES = ("CREATE INDEX IF NOT EXISTS archive_series ON archive(series_key)",
+               "CREATE INDEX IF NOT EXISTS archive_tag ON archive(tag)",
+               "CREATE INDEX IF NOT EXISTS archive_state ON archive(state, retry_at)")
 
     def __init__(self, path):
         self.path = path
@@ -127,7 +136,11 @@ class Database:
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript(SCHEMA)
         self._migrate(c)
+        for sql in self.INDEXES:
+            c.execute(sql)
         c.commit()
+        from . import archive               # here: the archive uses the release-name parser, not the database
+        archive.migrate(self)
 
     def _migrate(self, c):
         for table, column, kind in self.MIGRATIONS:
@@ -230,3 +243,11 @@ class Database:
                      int(bool(r.get("private"))), r.get("provider"), r.get("file"), time.time(),
                      r.get("season"), r.get("episode"), r.get("torrent_tag"))
         return rid
+
+    def switch_torrent(self, rid, r):
+        """Fallback (fallback.py): the episode's torrent is dead and the next candidate takes over, EVEN if the
+        release already played (save_release refuses that). The id and the .strm do not change; the subtitle
+        goes back to the placeholder (the real one was matched to the old encode) — the caller rewrites the file."""
+        self._replace(rid, {**r, "file": None})
+        self.execute("UPDATE subtitles SET state='placeholder', source=NULL, detail='torrent replaced by a fallback', "
+                     "attempts=0, updated_at=? WHERE release_id=?", time.time(), rid)

@@ -5,14 +5,15 @@ Used by the search outside the library ("Add series") and when a catalog series 
 (series_filter.py) decided and, if asked, registers it in the database; the Catalog writes
 the folders.
 
-Sources: every provider that can search series (and the archive of the feed-only ones), all
-through the SAME filter (exact series name, TVmaze's canonical list, one winner per episode).
+Sources: every provider that can search series plus everything the archive has of the series (feeds
+of every provider and earlier searches, including items a source no longer shows), all through the SAME
+filter (exact series name, TVmaze's canonical list, one winner per episode). The filter's decision goes
+back to the archive: an episode's next fallback comes from there.
 """
 
-import hashlib
 import logging
 
-from . import series_filter
+from . import archive, series_filter
 from .providers import SeriesQuery
 
 log = logging.getLogger("series")
@@ -22,7 +23,7 @@ def episode_release(c, t, e):
     """Winning candidate -> release (Database.save_release's format) of one episode. The torrent_tag is
     shared by every episode of the same torrent (pack), because an RSS item's infohash is unknown before
     the add."""
-    tag = hashlib.md5(f"{c['provider']}:{c['id']}".encode()).hexdigest()[:10]
+    tag = archive.tag_of(c["provider"], c["id"])
     return {"label": f"S{t:02d}E{e:02d}", "season": t, "episode": e, "name": c["title"],
             "quality": c["resolution"], "source_type": c["source"], "codec": c["codec"], "size": c.get("size"),
             "seeds": c["seeds"], "infohash": c.get("infohash"), "torrent_url": c.get("torrent_url"),
@@ -54,6 +55,8 @@ def research(series, resolver, cfg, registry, local=None, progress=None):
     seasons = seasons_of(resolver, series)
     cands, warnings = gather(series, registry, progress, seasons)
     r = series_filter.build_for_series(cands, series, resolver, cfg["series"], local)
+    if getattr(registry, "db", None) is not None:
+        archive.record_result(registry.db, r)
     return r, summary(r, series, resolver, len(cands), warnings)
 
 

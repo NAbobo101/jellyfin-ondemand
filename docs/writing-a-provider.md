@@ -24,9 +24,10 @@ class MyProvider(Provider):
         ...
 ```
 
-Implement only what the source can do. `capabilities` is derived from the methods you override. A
-provider with a feed but no search gets its items archived on every import and searched by name later
-(that is how RSS-only trackers take part in "Add series").
+Implement only what the source can do. `capabilities` is derived from the methods you override. Every
+item a provider returns is archived; a provider with a feed but no search is searched there by name
+later (that is how RSS-only trackers take part in "Add series"), and series items stay available as
+fallbacks even after the source drops them.
 
 ### TorrentItem
 

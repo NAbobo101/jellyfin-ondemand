@@ -62,6 +62,32 @@ library folder (~4 s instead of ~77 s).
 Different providers compete for the same version: the one with more seeds wins, but a release that has
 already played keeps its torrent (the real subtitle and a running download point at that encode).
 
+### The archive: nothing a provider showed is lost
+
+Feeds only show their latest items and any source may take a torrent down, so every item a provider
+returns (every feed, and the results of a series search) is kept in the `archive` table (`archive.py`):
+the address, what the source said (ids, files, seeds of the last sighting) and, for series, what the
+filter decided — `winner`, `fallback` (lost to another torrent for the same episode), `quarantine` (a
+discard that may change on its own: unresolved name, a season TVmaze does not list yet), `discarded`,
+or `dead` (playback proved it useless).
+
+- **Every import** filters what the feeds show now **plus** the archive's due items: new ones and
+  quarantine whose turn came (back-off 1, 2, 4… days up to 30), together with every live item of the
+  same series, `reevaluate_names` series per round (catalog series first). A season announced before
+  TVmaze listed it comes in once TVmaze does, months after it left the feed.
+- **Feed-only providers** are also read every `collect_min` just to archive (no filters, no TVmaze),
+  so a service that is down for a day loses no item.
+- **TVmaze answers expire** (`tvmaze.py`): an episode list is good for 2 days — a cache that never
+  expires freezes the list and a new season never gets past the filter. Expired + TVmaze down = the
+  old answer.
+- **Fallback** (`fallback.py`): when an episode's torrent does not play, the archived item counts a
+  failure — at once if it is fake or lacks the episode's video, otherwise on the 2nd failure at least
+  30 min apart (cold magnet, tracker down, empty swarm). Once dead, the filter runs on the archive alone
+  and every episode of that torrent switches to its new winner, **keeping its id and `.strm`** (the
+  subtitle goes back to the placeholder). The next click plays the fallback.
+- Items of a series in the catalog are kept for good; the rest leave after 365 days unseen.
+  `cli archive` shows it (never the URL); `cli fallback RELEASE` switches by hand.
+
 ## Lifecycle
 
 ```

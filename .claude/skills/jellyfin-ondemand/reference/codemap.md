@@ -20,7 +20,8 @@ Web: ES5 only; `node --check web/*.js`; `node web/tests/search.test.js` needs `n
 | `abr.py` | ABR ladder routes | `test_abr.py` |
 | `providers/base.py` · `registry.py` | `Provider`, `TorrentItem`, `Http`; loading `[[providers]]`, isolation, archive | `test_providers.py` |
 | `providers/torznab.py` · `unit3d.py` · `qbit_rss.py` · `archive_org.py` | built-in adapters | `test_providers.py` |
-| `archive.py` | items of feed-only providers, searched by name | `test_series_ondemand.py` |
+| `archive.py` | every item a provider showed; series states (winner/fallback/quarantine/dead), re-evaluation, failures | `test_archive.py` |
+| `fallback.py` | a dead episode torrent -> the archive's next candidate (same id and `.strm`) | `test_archive.py` |
 | `subtitles/` | SAMI/SRT formats, SubDL, on-play fetcher | `test_subtitles.py` |
 | `jellyfin.py` | Jellyfin API, computed item ids | via others |
 | `config.py` · `languages.py` · `doctor.py` · `cli.py` | defaults · subtitle languages · setup checks · CLI | `test_doctor.py` |

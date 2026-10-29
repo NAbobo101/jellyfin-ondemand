@@ -4,7 +4,9 @@
     docker compose exec ondemand python3 -m ondemand.cli status
     docker compose exec ondemand python3 -m ondemand.cli providers          # what each provider can do
     docker compose exec ondemand python3 -m ondemand.cli preview [--provider NAME] [--title TEXT] [--detail]
-    docker compose exec ondemand python3 -m ondemand.cli import             # the scheduler's step, now
+    docker compose exec ondemand python3 -m ondemand.cli import [--all]     # the scheduler's step, now
+    docker compose exec ondemand python3 -m ondemand.cli archive [--series tvdb:N|name] [--state quarantine]
+    docker compose exec ondemand python3 -m ondemand.cli fallback RELEASE   # dead episode torrent -> next candidate
     docker compose exec ondemand python3 -m ondemand.cli search-movie "Night of the Living Dead" [--register]
     docker compose exec ondemand python3 -m ondemand.cli search-series "Dexter" [--register]
     docker compose exec ondemand python3 -m ondemand.cli write [--batch 20] [--force]
@@ -22,7 +24,7 @@ import logging
 import os
 from collections import Counter
 
-from . import config, movie_filter, series_filter, series_ondemand
+from . import archive, config, movie_filter, series_filter, series_ondemand
 from .providers import MovieQuery
 from .release_name import normalize
 from .service import build, import_catalog
@@ -129,7 +131,43 @@ def preview(args):
 
 
 def import_cmd(args):
-    import_catalog(_app())
+    """--all: re-evaluate the whole series archive at once, without the per-round limit (mind the memory)."""
+    import_catalog(_app(), everything=args.all)
+
+
+def archive_cmd(args):
+    """The series archive: without filters, the count per state and provider; with --series/--state, the
+    items (never the URL)."""
+    app = _app()
+    if not args.series and not args.state:
+        for r in app.db.all("SELECT state, provider, count(*) n FROM archive WHERE kind='series' "
+                            "GROUP BY state, provider ORDER BY state, provider"):
+            print(f"{r['state']:11} {r['provider']:16} {r['n']}")
+        return
+    sql, params = "SELECT * FROM archive WHERE kind='series'", []
+    if args.series:
+        sql += " AND (series_key=? OR norm_name=?)"
+        params += [args.series, normalize(args.series)]
+    if args.state:
+        sql += " AND state=?"
+        params.append(args.state)
+    for r in app.db.all(sql + " ORDER BY season, title LIMIT ?", *params, args.limit):
+        print(f"{r['state']:10} {r['provider']:14} {r['seeds'] or 0:4d} seeds  {r['title']}  [{r['series_key'] or '-'}]"
+              f"  {r['reason'] or ''}")
+
+
+def fallback_cmd(args):
+    """Mark the release's current torrent as dead and switch its episodes to the archive's next candidate (what
+    playback does by itself after failing). The service notices on the next play."""
+    from .fallback import Fallback
+    app = _app()
+    r = app.db.one("SELECT torrent_tag FROM releases WHERE id=?", args.release)
+    if r is None or not r["torrent_tag"]:
+        raise SystemExit("unknown release, or not an episode")
+    if archive.failure(app.db, r["torrent_tag"], "marked by hand (cli fallback)", severe=True) is None:
+        raise SystemExit("the archive does not know this release's torrent")
+    n = Fallback(app.cfg, app.db, app.qbit, app.tv, app.cat).switch(r["torrent_tag"])
+    print(f"{n} episode(s) switched torrents")
 
 
 def search_movie(args):
@@ -261,12 +299,22 @@ def main():
     pv.add_argument("--title", help="only items whose title contains this text")
     pv.add_argument("--detail", action="store_true", help="for each episode, who lost and why")
     pv.set_defaults(f=preview)
-    sub.add_parser("import", help="the scheduler's import step, now").set_defaults(f=import_cmd)
+    im = sub.add_parser("import", help="the scheduler's import step, now")
+    im.add_argument("--all", action="store_true", help="re-evaluate the whole series archive, no per-round limit")
+    im.set_defaults(f=import_cmd)
+    ar = sub.add_parser("archive", help="the series archive (never prints a URL)")
+    ar.add_argument("--series", help="tvdb:N or the original name")
+    ar.add_argument("--state", choices=["new", "winner", "fallback", "quarantine", "discarded", "dead"])
+    ar.add_argument("--limit", type=int, default=200)
+    ar.set_defaults(f=archive_cmd)
+    fb = sub.add_parser("fallback", help="dead episode torrent -> the archive's next candidate")
+    fb.add_argument("release")
+    fb.set_defaults(f=fallback_cmd)
     sm = sub.add_parser("search-movie", help="what the providers have of one movie (only reads)")
     sm.add_argument("movie", help="a name or an IMDb id (tt…)")
     sm.add_argument("--register", action="store_true")
     sm.set_defaults(f=search_movie)
-    ss = sub.add_parser("search-series", help="everything that exists of one series (only reads)")
+    ss = sub.add_parser("search-series", help="everything that exists of one series (registers no episode without --register; the archive keeps what it saw)")
     ss.add_argument("series", help="a name, an IMDb id (tt…) or a TheTVDB id")
     ss.add_argument("--register", action="store_true")
     ss.set_defaults(f=search_series)

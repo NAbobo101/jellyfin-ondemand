@@ -8,6 +8,12 @@ the filter checks each candidate's (season, episode).
 
 Service limit: 20 requests every 10 s; the default pause stays well below. In-memory cache
 and, if `cache_file` is given, a JSON file (a simulation does not repeat hundreds of requests).
+
+Validity: an episode list is good for `VALIDITY["episodes"]` — a cache that never expires freezes the
+list on the day of the first request, and a new season then never gets past the filter (seen in
+practice: a season aired weeks earlier, dozens of archived releases, all in quarantine). Searches and
+lookups last longer, empty answers (404, a search with nothing) shorter. Expired + TVmaze down = the old
+answer is used. An entry nobody asked for in `DROP_DAYS` leaves on `save` (the cache does not grow forever).
 """
 
 import json
@@ -24,6 +30,9 @@ log = logging.getLogger("tvmaze")
 BASE = "https://api.tvmaze.com/"
 EPISODE_FIELDS = ("season", "number", "airdate")
 USER_AGENT = "jellyfin-ondemand/1.0"
+VALIDITY = {"episodes": 2 * 86400, "other": 7 * 86400, "empty": 86400}
+DROP_DAYS = 90
+WHEN = "__when__"              # in the file: {key: time of the request}
 
 
 def _slim(key, data):
@@ -45,13 +54,21 @@ class TVmaze:
         self._last = 0.0
         self._lock = threading.RLock()      # the import job, requests and the API share the object and the pace
         self.cache = {}
+        self.when = {}
         self.requests = 0
         if cache_file and os.path.exists(cache_file):
             try:
                 with open(cache_file, encoding="utf-8") as f:
-                    self.cache = {k: _slim(k, v) for k, v in json.load(f).items()}
+                    data = json.load(f)
+                self.when = data.pop(WHEN, None) or {}
+                self.cache = {k: _slim(k, v) for k, v in data.items()}
+                # A cache from before validity existed: episode lists are born expired (they are what froze);
+                # searches and lookups count from the file's date.
+                mtime = os.path.getmtime(cache_file)
+                for k in self.cache:
+                    self.when.setdefault(k, mtime - VALIDITY["episodes"] - 1 if "/episodes?" in k else mtime)
             except (OSError, ValueError, AttributeError):
-                self.cache = {}
+                self.cache, self.when = {}, {}
 
     def _get(self, route, **params):
         with self._lock:
@@ -60,7 +77,21 @@ class TVmaze:
     def _get_locked(self, route, **params):
         key = route + "?" + urllib.parse.urlencode(sorted(params.items()))
         if key in self.cache:
-            return self.cache[key]
+            if not self._expired(key):
+                return self.cache[key]
+            try:
+                return self._fetch(route, key)
+            except TVmazeError as e:            # down: the old answer serves until the next time
+                log.warning("TVmaze: %s; using the stored (expired) answer", e)
+                return self.cache[key]
+        return self._fetch(route, key)
+
+    def _expired(self, key):
+        data = self.cache[key]
+        validity = VALIDITY["empty"] if not data else VALIDITY["episodes" if "/episodes?" in key else "other"]
+        return time.time() - self.when.get(key, 0.0) > validity
+
+    def _fetch(self, route, key):
         wait = self.pause - (time.monotonic() - self._last)
         if wait > 0:
             time.sleep(wait)
@@ -87,15 +118,20 @@ class TVmaze:
         self._last = time.monotonic()
         self.requests += 1
         self.cache[key] = data = _slim(key, data)
+        self.when[key] = time.time()
         return data
 
     def save(self):
         if not self.cache_file:
             return
         with self._lock:
+            limit = time.time() - DROP_DAYS * 86400
+            for k in [k for k in self.cache if self.when.get(k, 0.0) < limit]:
+                del self.cache[k]                          # a request nobody repeated in DROP_DAYS
+            self.when = {k: v for k, v in self.when.items() if k in self.cache}
             tmp = self.cache_file + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.cache, f, ensure_ascii=False)
+                json.dump({**self.cache, WHEN: self.when}, f, ensure_ascii=False)
             os.replace(tmp, self.cache_file)
 
     # ------------------------------------------------------------ queries

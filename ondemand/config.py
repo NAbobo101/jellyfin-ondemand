@@ -69,6 +69,9 @@ DEFAULTS = {
         "allowed_language_tags": [],
         # 100 MB: a 20-minute anime episode fits. A public torrent is abandoned/deleted by the lifecycle like any other.
         "min_video_mb": 100, "complete_days": 7,
+        # The archive (archive.py): series re-evaluated from it per import round (TVmaze requests and memory)
+        # and how often feed-only providers are read just to archive (a day down loses no item).
+        "reevaluate_names": 60, "collect_min": 60,
     },
     "lifecycle": {
         "interval_s": 30,

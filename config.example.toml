@@ -68,6 +68,8 @@ single_max_gb = 8
 allowed_language_tags = []
 min_video_mb = 100
 complete_days = 7                   # opening a catalog series looks for missing episodes at most this often
+reevaluate_names = 60               # series re-evaluated from the archive per import (quarantine comes back)
+collect_min = 60                    # feed-only providers are read this often just to archive their items
 
 [lifecycle]
 interval_s = 30
